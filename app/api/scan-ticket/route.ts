@@ -2,6 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
+const MAX_DESCRIPTION_LENGTH = 10_000;
 
 const ALLOWED_TYPES = [
   "image/jpeg",
@@ -24,36 +25,52 @@ export async function POST(request: Request) {
 
     const formData = await request.formData();
     const image = formData.get("image");
+    const descriptionValue = formData.get("description");
+    const description =
+      typeof descriptionValue === "string" ? descriptionValue.trim() : "";
 
-    if (!(image instanceof File)) {
+    if (!(image instanceof File) && !description) {
       return NextResponse.json(
-        { error: "Please upload a ticket screenshot." },
+        { error: "Upload a ticket screenshot or enter a ticket description." },
         { status: 400 }
       );
     }
 
-    if (!ALLOWED_TYPES.includes(image.type)) {
+    if (description.length > MAX_DESCRIPTION_LENGTH) {
+      return NextResponse.json(
+        { error: "Ticket description must not exceed 10,000 characters." },
+        { status: 400 }
+      );
+    }
+
+    if (image instanceof File && !ALLOWED_TYPES.includes(image.type)) {
       return NextResponse.json(
         { error: "Only JPEG, PNG, and WebP images are supported." },
         { status: 400 }
       );
     }
 
-    if (image.size > MAX_FILE_SIZE) {
+    if (image instanceof File && image.size > MAX_FILE_SIZE) {
       return NextResponse.json(
         { error: "Image size must not exceed 5 MB." },
         { status: 400 }
       );
     }
 
-    const buffer = Buffer.from(await image.arrayBuffer());
-    const base64Image = buffer.toString("base64");
+    const inputPart = image instanceof File
+      ? {
+          inlineData: {
+            mimeType: image.type,
+            data: Buffer.from(await image.arrayBuffer()).toString("base64"),
+          },
+        }
+      : { text: `Ticket description:\n${description}` };
 
     const prompt = `
 You are an experienced software developer helping prepare
 development tickets for a Bitbucket or GitHub pull request.
 
-Read and analyze the supplied ticket screenshot.
+Read and analyze the supplied ticket screenshot or ticket description.
 Detect any ticket key or ID (for example: PROD-109, JIRA-123, TASK-45, ABC-109, etc.).
 
 Generate these four fields:
@@ -63,14 +80,14 @@ Generate these four fields:
 4. prDescription
 
 Rules:
-- Identify the ticket ID/key from the screenshot (e.g. PROD-109).
+- Identify the ticket ID/key from the provided input (e.g. PROD-109).
 - For branchName: Start with the ticket ID if present, followed by concise kebab-case description (example: "PROD-109-login-validation"). Do NOT use prefixes like feat/, fix/, chore/, or bug/.
 - For commitMessage: Include the ticket ID, followed by a concise direct message (example: "PROD-109: Improve login validation" or "PROD-109 Improve login validation"). Do NOT use conventional prefixes like feat:, fix:, chore:.
 - For prTitle: Include the ticket ID (example: "[PROD-109] Fix login validation").
 - For prDescription: Write a useful PR description with Summary and Testing sections.
 - Use the ticket's actual meaning. Never invent requirements.
 - If important details are unclear, mention the uncertainty in the PR description instead of making up facts.
-- Do not claim tests have passed unless the screenshot says so.
+- Do not claim tests have passed unless the provided input says so.
 - Return ONLY a valid JSON object matching the requested fields.
 - All four values must be strings.
 
@@ -90,15 +107,7 @@ Example format (when ticket is PROD-109):
       contents: [
         {
           role: "user",
-          parts: [
-            { text: prompt },
-            {
-              inlineData: {
-                mimeType: image.type,
-                data: base64Image,
-              },
-            },
-          ],
+          parts: [{ text: prompt }, inputPart],
         },
       ],
       config: {
@@ -150,7 +159,7 @@ Example format (when ticket is PROD-109):
     console.error("Ticket scan error:", error);
 
     const message =
-      error instanceof Error ? error.message : "Unable to analyze the screenshot.";
+      error instanceof Error ? error.message : "Unable to analyze the ticket.";
 
     return NextResponse.json(
       {

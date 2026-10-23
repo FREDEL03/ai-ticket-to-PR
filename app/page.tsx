@@ -46,6 +46,7 @@ const FIELDS: {
 
 export default function Home() {
   const [image, setImage] = useState<File | null>(null);
+  const [description, setDescription] = useState("");
   const [preview, setPreview] = useState<string | null>(null);
   const [result, setResult] = useState<TicketResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -86,7 +87,16 @@ export default function Home() {
       return;
     }
 
+    setDescription("");
     setImage(file);
+  }
+
+  function handleDescriptionChange(value: string) {
+    setError("");
+    setResult(null);
+    setCopiedKey(null);
+    setDescription(value);
+    if (value.trim()) setImage(null);
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -110,8 +120,8 @@ export default function Home() {
   }
 
   async function handleScan() {
-    if (!image) {
-      setError("Please upload a ticket screenshot first.");
+    if (!image && !description.trim()) {
+      setError("Please upload a ticket screenshot or enter a description first.");
       return;
     }
 
@@ -122,7 +132,8 @@ export default function Home() {
 
     try {
       const formData = new FormData();
-      formData.append("image", image);
+      if (image) formData.append("image", image);
+      else formData.append("description", description.trim());
 
       const res = await fetch("/api/scan-ticket", {
         method: "POST",
@@ -131,7 +142,7 @@ export default function Home() {
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || "Unable to analyze screenshot.");
+        throw new Error(data.error || "Unable to analyze ticket.");
       }
 
       const cleanBranch = (data.branchName || "").replace(/^(feat|fix|chore|bug|refactor|docs|test)\//i, "");
@@ -173,6 +184,7 @@ export default function Home() {
 
   function resetAll() {
     setImage(null);
+    setDescription("");
     setResult(null);
     setError("");
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -215,7 +227,7 @@ export default function Home() {
           id="ticket-upload"
         />
 
-        {!image ? (
+        {!image && !description.trim() ? (
           /* View 1: Centered Upload State (No Image) */
           <div className="max-w-xl mx-auto pt-6 pb-12">
             <div className="text-center mb-8">
@@ -226,7 +238,7 @@ export default function Home() {
                 Automated Git Workflow
               </div>
               <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-                From screenshot to ready-to-merge PR
+                From ticket input to ready-to-merge PR
               </h1>
               <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
                 Upload any ticket from Jira, Linear, or GitHub. Instant branch names, commit messages, and PR descriptions.
@@ -260,6 +272,32 @@ export default function Home() {
                 </p>
               </label>
 
+              <div className="my-5 flex items-center gap-3 text-[11px] uppercase tracking-wider text-zinc-400">
+                <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+                or describe it
+                <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
+              </div>
+              <label htmlFor="ticket-description" className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                Ticket description
+              </label>
+              <textarea
+                id="ticket-description"
+                value={description}
+                onChange={(e) => handleDescriptionChange(e.target.value)}
+                placeholder="Describe what needs to be built or fixed..."
+                rows={5}
+                maxLength={10000}
+                className="mt-1.5 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50/50 dark:bg-zinc-950/50 p-3 text-sm outline-none focus:border-zinc-400 focus:ring-1 focus:ring-zinc-300 resize-y"
+              />
+              <button
+                type="button"
+                onClick={handleScan}
+                disabled={!description.trim() || loading}
+                className="mt-3 w-full h-10 rounded-lg bg-zinc-900 text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Generate PR Details
+              </button>
+
               {error && (
                 <div className="mt-4 rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/40 p-3 text-xs text-red-800 dark:text-red-300">
                   {error}
@@ -268,7 +306,7 @@ export default function Home() {
             </div>
           </div>
         ) : (
-          /* View 2: Horizontal 2-Column Layout (Image Uploaded) */
+          /* View 2: Horizontal 2-Column Layout (Image or Description) */
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* Left Column: Ticket Preview & Controls */}
             <div className="lg:col-span-5 lg:sticky lg:top-20 space-y-4">
@@ -276,7 +314,7 @@ export default function Home() {
                 <div className="flex items-center justify-between pb-3 border-b border-zinc-100 dark:border-zinc-800">
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-blue-600" />
-                    <h2 className="text-sm font-semibold">Ticket Screenshot</h2>
+                    <h2 className="text-sm font-semibold">{image ? "Ticket Screenshot" : "Ticket Description"}</h2>
                   </div>
                   <div className="flex items-center gap-2">
                     <button
@@ -297,20 +335,32 @@ export default function Home() {
                   </div>
                 </div>
 
-                {preview && (
-                  <div className="mt-3 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-950/5 dark:bg-zinc-950/50 p-2 overflow-hidden flex items-center justify-center max-h-[460px]">
-                    <img
-                      src={preview}
-                      alt="Ticket screenshot preview"
-                      className="max-h-[440px] w-full rounded object-contain"
-                    />
-                  </div>
+                {image ? (
+                  <>
+                    {preview && (
+                      <div className="mt-3 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-950/5 dark:bg-zinc-950/50 p-2 overflow-hidden flex items-center justify-center max-h-[460px]">
+                        <img
+                          src={preview}
+                          alt="Ticket screenshot preview"
+                          className="max-h-[440px] w-full rounded object-contain"
+                        />
+                      </div>
+                    )}
+                    <div className="mt-3 flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
+                      <span className="truncate max-w-[220px] font-mono">{image.name}</span>
+                      <span>{(image.size / (1024 * 1024)).toFixed(2)} MB</span>
+                    </div>
+                  </>
+                ) : (
+                  <textarea
+                    aria-label="Ticket description"
+                    value={description}
+                    onChange={(e) => handleDescriptionChange(e.target.value)}
+                    rows={10}
+                    maxLength={10000}
+                    className="mt-3 w-full rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/50 p-3 text-sm outline-none focus:border-zinc-400 focus:ring-1 focus:ring-zinc-300 resize-y"
+                  />
                 )}
-
-                <div className="mt-3 flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
-                  <span className="truncate max-w-[220px] font-mono">{image.name}</span>
-                  <span>{(image.size / (1024 * 1024)).toFixed(2)} MB</span>
-                </div>
 
                 <button
                   type="button"
@@ -356,7 +406,7 @@ export default function Home() {
                     </svg>
                   </div>
                   <div>
-                    <h3 className="font-semibold text-sm">Reading Ticket Screenshot</h3>
+                    <h3 className="font-semibold text-sm">Reading Ticket</h3>
                     <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
                       Gemini is generating branch name, commit message, and PR template...
                     </p>
@@ -379,7 +429,7 @@ export default function Home() {
                   </div>
                   <h3 className="text-sm font-semibold">Ready to Generate</h3>
                   <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm mx-auto mt-1">
-                    Click &quot;Generate PR Details&quot; on the left to analyze this ticket screenshot and produce your Git branch, commit, and PR template.
+                    Click &quot;Generate PR Details&quot; on the left to analyze this ticket and produce your Git branch, commit, and PR template.
                   </p>
                 </div>
               )}

@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "AI Ticket-to-PR",
-  description: "Generate branch names, commit messages, and PR details from ticket screenshots",
+  description: "Generate branch names, commit messages, and PR details from ticket screenshots or descriptions",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
