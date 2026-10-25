@@ -53,63 +53,87 @@ export default function Home() {
   const [error, setError] = useState("");
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [isListening, setIsListening] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const descTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   const hasCompletedWord = /\S+\s/.test(description);
-  const isTwoColumn = Boolean(image || loading || result || hasCompletedWord);
+  const isTwoColumn = Boolean(image || loading || result || isTranscribing || hasCompletedWord);
 
   useEffect(() => {
     return () => {
-      recognitionRef.current?.stop();
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+        mediaRecorderRef.current.stop();
+      }
     };
   }, []);
 
-  function toggleListening() {
-    if (isListening) {
-      recognitionRef.current?.stop();
-      setIsListening(false);
-      return;
-    }
-
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      setError("Speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.");
-      return;
-    }
-
+  async function startRecording() {
+    setError("");
     try {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = false;
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
 
-      recognition.onstart = () => setIsListening(true);
-      recognition.onresult = (event: any) => {
-        const lastResult = event.results[event.results.length - 1];
-        if (lastResult?.[0]?.transcript) {
-          const text = lastResult[0].transcript.trim();
-          setDescription((prev) => (prev ? `${prev} ${text} ` : `${text} `));
-          setError("");
+      const recorder = new MediaRecorder(stream);
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((track) => track.stop());
+        const audioBlob = new Blob(audioChunksRef.current, {
+          type: recorder.mimeType || "audio/webm",
+        });
+
+        if (audioBlob.size === 0) return;
+
+        setIsTranscribing(true);
+        try {
+          const fd = new FormData();
+          fd.append("audio", audioBlob, "recording.webm");
+
+          const res = await fetch("/api/transcribe", {
+            method: "POST",
+            body: fd,
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "Failed to transcribe audio.");
+
+          if (data.text) {
+            setDescription((prev) => (prev ? `${prev.trim()} ${data.text} ` : `${data.text} `));
+          }
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Voice transcription failed.");
+        } finally {
+          setIsTranscribing(false);
         }
       };
-      recognition.onerror = (e: any) => {
-        if (e.error !== "no-speech") {
-          setError(`Mic error: ${e.error}`);
-        }
-        setIsListening(false);
-      };
-      recognition.onend = () => setIsListening(false);
 
-      recognition.start();
-      recognitionRef.current = recognition;
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setIsRecording(true);
     } catch {
-      setError("Could not access microphone.");
-      setIsListening(false);
+      setError("Microphone permission denied or not supported.");
+      setIsRecording(false);
+    }
+  }
+
+  function stopRecording() {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+  }
+
+  function toggleVoice() {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
     }
   }
 
@@ -251,8 +275,11 @@ export default function Home() {
   }
 
   function resetAll() {
-    recognitionRef.current?.stop();
-    setIsListening(false);
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecording(false);
+    setIsTranscribing(false);
     setImage(null);
     setDescription("");
     setResult(null);
@@ -353,10 +380,13 @@ export default function Home() {
                 </label>
                 <button
                   type="button"
-                  onClick={toggleListening}
+                  onClick={toggleVoice}
+                  disabled={isTranscribing}
                   className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition ${
-                    isListening
+                    isRecording
                       ? "bg-red-500 text-white animate-pulse"
+                      : isTranscribing
+                      ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
                       : "bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300"
                   }`}
                 >
@@ -365,7 +395,11 @@ export default function Home() {
                     <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
                     <line x1="12" y1="19" x2="12" y2="22" />
                   </svg>
-                  {isListening ? "Listening... (Click to stop)" : "Speak"}
+                  {isRecording
+                    ? "Recording... (Click to finish)"
+                    : isTranscribing
+                    ? "Transcribing with Gemini..."
+                    : "Speak"}
                 </button>
               </div>
               <textarea
@@ -445,10 +479,13 @@ export default function Home() {
                       <span className="text-xs text-zinc-500 dark:text-zinc-400">Describe or dictate</span>
                       <button
                         type="button"
-                        onClick={toggleListening}
+                        onClick={toggleVoice}
+                        disabled={isTranscribing}
                         className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium transition ${
-                          isListening
+                          isRecording
                             ? "bg-red-500 text-white animate-pulse"
+                            : isTranscribing
+                            ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
                             : "bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300"
                         }`}
                       >
@@ -457,7 +494,11 @@ export default function Home() {
                           <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
                           <line x1="12" y1="19" x2="12" y2="22" />
                         </svg>
-                        {isListening ? "Listening... (Stop)" : "Speak"}
+                        {isRecording
+                          ? "Recording... (Stop)"
+                          : isTranscribing
+                          ? "Transcribing..."
+                          : "Speak"}
                       </button>
                     </div>
                     <textarea
