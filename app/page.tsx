@@ -53,12 +53,65 @@ export default function Home() {
   const [error, setError] = useState("");
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [isListening, setIsListening] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const descTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const recognitionRef = useRef<any>(null);
 
   const hasCompletedWord = /\S+\s/.test(description);
   const isTwoColumn = Boolean(image || loading || result || hasCompletedWord);
+
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.stop();
+    };
+  }, []);
+
+  function toggleListening() {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      setError("Speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.");
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = false;
+
+      recognition.onstart = () => setIsListening(true);
+      recognition.onresult = (event: any) => {
+        const lastResult = event.results[event.results.length - 1];
+        if (lastResult?.[0]?.transcript) {
+          const text = lastResult[0].transcript.trim();
+          setDescription((prev) => (prev ? `${prev} ${text} ` : `${text} `));
+          setError("");
+        }
+      };
+      recognition.onerror = (e: any) => {
+        if (e.error !== "no-speech") {
+          setError(`Mic error: ${e.error}`);
+        }
+        setIsListening(false);
+      };
+      recognition.onend = () => setIsListening(false);
+
+      recognition.start();
+      recognitionRef.current = recognition;
+    } catch {
+      setError("Could not access microphone.");
+      setIsListening(false);
+    }
+  }
 
   useEffect(() => {
     if (isTwoColumn && !image && descTextareaRef.current) {
@@ -198,6 +251,8 @@ export default function Home() {
   }
 
   function resetAll() {
+    recognitionRef.current?.stop();
+    setIsListening(false);
     setImage(null);
     setDescription("");
     setResult(null);
@@ -292,9 +347,27 @@ export default function Home() {
                 or describe it
                 <span className="h-px flex-1 bg-zinc-200 dark:bg-zinc-800" />
               </div>
-              <label htmlFor="ticket-description" className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                Ticket description
-              </label>
+              <div className="flex items-center justify-between">
+                <label htmlFor="ticket-description" className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                  Ticket description
+                </label>
+                <button
+                  type="button"
+                  onClick={toggleListening}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition ${
+                    isListening
+                      ? "bg-red-500 text-white animate-pulse"
+                      : "bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300"
+                  }`}
+                >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <line x1="12" y1="19" x2="12" y2="22" />
+                  </svg>
+                  {isListening ? "Listening... (Click to stop)" : "Speak"}
+                </button>
+              </div>
               <textarea
                 id="ticket-description"
                 value={description}
@@ -367,15 +440,36 @@ export default function Home() {
                     </div>
                   </>
                 ) : (
-                  <textarea
-                    ref={descTextareaRef}
-                    aria-label="Ticket description"
-                    value={description}
-                    onChange={(e) => handleDescriptionChange(e.target.value)}
-                    rows={10}
-                    maxLength={10000}
-                    className="mt-3 w-full rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/50 p-3 text-sm outline-none focus:border-zinc-400 focus:ring-1 focus:ring-zinc-300 resize-y"
-                  />
+                  <>
+                    <div className="mt-3 flex items-center justify-between">
+                      <span className="text-xs text-zinc-500 dark:text-zinc-400">Describe or dictate</span>
+                      <button
+                        type="button"
+                        onClick={toggleListening}
+                        className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium transition ${
+                          isListening
+                            ? "bg-red-500 text-white animate-pulse"
+                            : "bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300"
+                        }`}
+                      >
+                        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                          <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                          <line x1="12" y1="19" x2="12" y2="22" />
+                        </svg>
+                        {isListening ? "Listening... (Stop)" : "Speak"}
+                      </button>
+                    </div>
+                    <textarea
+                      ref={descTextareaRef}
+                      aria-label="Ticket description"
+                      value={description}
+                      onChange={(e) => handleDescriptionChange(e.target.value)}
+                      rows={10}
+                      maxLength={10000}
+                      className="mt-1.5 w-full rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/50 p-3 text-sm outline-none focus:border-zinc-400 focus:ring-1 focus:ring-zinc-300 resize-y"
+                    />
+                  </>
                 )}
 
                 <button
