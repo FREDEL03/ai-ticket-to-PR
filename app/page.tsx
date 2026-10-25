@@ -55,6 +55,21 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const descTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const hasCompletedWord = /\S+\s/.test(description);
+  const isTwoColumn = Boolean(image || loading || result || hasCompletedWord);
+
+  useEffect(() => {
+    if (isTwoColumn && !image && descTextareaRef.current) {
+      const el = descTextareaRef.current;
+      if (document.activeElement !== el) {
+        el.focus();
+        const len = el.value.length;
+        el.setSelectionRange(len, len);
+      }
+    }
+  }, [isTwoColumn, image]);
 
   useEffect(() => {
     if (!image) {
@@ -227,7 +242,7 @@ export default function Home() {
           id="ticket-upload"
         />
 
-        {!image && !description.trim() ? (
+        {!isTwoColumn ? (
           /* View 1: Centered Upload State (No Image) */
           <div className="max-w-xl mx-auto pt-6 pb-12">
             <div className="text-center mb-8">
@@ -353,6 +368,7 @@ export default function Home() {
                   </>
                 ) : (
                   <textarea
+                    ref={descTextareaRef}
                     aria-label="Ticket description"
                     value={description}
                     onChange={(e) => handleDescriptionChange(e.target.value)}
